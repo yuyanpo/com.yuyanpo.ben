@@ -60,3 +60,13 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Ben local artifacts
+.DS_Store
+build/
+DerivedData/
+*.xcresult
+.env
+.env.*
+!.env.example
+*.log
