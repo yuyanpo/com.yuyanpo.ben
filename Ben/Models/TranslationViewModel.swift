@@ -3,19 +3,28 @@ import SwiftUI
 
 @MainActor
 final class TranslationViewModel: ObservableObject {
-    @Published var inputText = ""
+    @Published var inputText = "" {
+        didSet {
+            if inputText != oldValue {
+                copiedOriginal = false
+                speech.stop()
+            }
+        }
+    }
     @Published private(set) var result: TranslationResult?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isBusy = false
     @Published private(set) var request: TranslationRequest?
     @Published var shortcutError: String?
     @Published var copied = false
+    @Published private(set) var copiedOriginal = false
     @Published private(set) var sourceLanguage = SourceLanguage.automatic
     @Published private(set) var selectedProvider: TranslationProviderID
 
     private let provider: any TranslationProvider
     private let defaults: UserDefaults
     private var translationTask: Task<Void, Never>?
+    let speech = TextSpeechController()
 
     init(provider: any TranslationProvider = OnlineTranslationProvider(), defaults: UserDefaults = .standard) {
         self.provider = provider
@@ -103,6 +112,7 @@ final class TranslationViewModel: ObservableObject {
     }
 
     func cancel() {
+        speech.stop()
         translationTask?.cancel()
         translationTask = nil
         request = nil
@@ -114,5 +124,22 @@ final class TranslationViewModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(result.translatedText, forType: .string)
         copied = true
+    }
+
+    func copyOriginal() {
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(inputText, forType: .string)
+        copiedOriginal = true
+    }
+
+    func clearText() {
+        cancel()
+        inputText = ""
+        result = nil
+        errorMessage = nil
+        sourceLanguage = .automatic
+        copied = false
+        copiedOriginal = false
     }
 }

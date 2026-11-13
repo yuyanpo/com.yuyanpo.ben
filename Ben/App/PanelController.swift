@@ -87,6 +87,15 @@ final class PanelController {
                 self.hide()
                 return nil
             }
+            if event.type == .keyDown, event.window === self.panel,
+               event.keyCode == 36 || event.keyCode == 76,
+               event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command {
+                if !event.isARepeat, !self.model.isBusy,
+                   !self.model.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.model.beginTranslation()
+                }
+                return nil
+            }
             if event.type != .keyDown, event.window !== self.panel {
                 self.hide()
             }

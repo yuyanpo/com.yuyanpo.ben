@@ -42,7 +42,12 @@ struct SettingsView: View {
                 }
             }
             Section("辅助功能权限") {
-                Label(reader.hasPermission ? "已授权" : "尚未授权", systemImage: reader.hasPermission ? "checkmark.circle" : "lock")
+                HStack(spacing: 4) {
+                    Image(systemName: reader.hasPermission ? "checkmark.circle" : "lock")
+                    Text(reader.hasPermission ? "已授权" : "尚未授权")
+                }
+                .foregroundStyle(reader.hasPermission ? Color.green : Color.secondary)
+                .accessibilityElement(children: .combine)
                 Text("Ben 在你按快捷键时读取其他软件中选中的文字。手动输入不需要此权限。")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
