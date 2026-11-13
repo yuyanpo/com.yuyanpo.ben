@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-@preconcurrency import Translation
 
 @MainActor
 final class TranslationViewModel: ObservableObject {
@@ -8,15 +7,39 @@ final class TranslationViewModel: ObservableObject {
     @Published private(set) var result: TranslationResult?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isBusy = false
-    @Published private(set) var translationPhase = TranslationPhase.checkingModels
     @Published private(set) var request: TranslationRequest?
-    @Published var configuration: TranslationSession.Configuration?
     @Published var shortcutError: String?
     @Published var copied = false
     @Published private(set) var sourceLanguage = SourceLanguage.automatic
+    @Published private(set) var selectedProvider: TranslationProviderID
+
+    private let provider: any TranslationProvider
+    private let defaults: UserDefaults
+    private var translationTask: Task<Void, Never>?
+
+    init(provider: any TranslationProvider = OnlineTranslationProvider(), defaults: UserDefaults = .standard) {
+        self.provider = provider
+        self.defaults = defaults
+        selectedProvider = TranslationProviderID(rawValue: defaults.string(forKey: "translationProvider") ?? "") ?? .microsoft
+    }
+
+    var displayedProvider: TranslationProviderID {
+        result.flatMap { TranslationProviderID(rawValue: $0.providerID) } ?? request?.providerID ?? selectedProvider
+    }
 
     var detectedSourceLanguage: String? {
         sourceLanguage.identifier ?? LanguageDetection.sourceLanguage(for: inputText)
+    }
+
+    func selectProvider(_ value: TranslationProviderID) {
+        guard value != selectedProvider else { return }
+        cancel()
+        selectedProvider = value
+        defaults.set(value.rawValue, forKey: "translationProvider")
+        result = nil
+        errorMessage = nil
+        copied = false
+        // A settings change never uploads text. The next explicit translation uses this service.
     }
 
     func selectSourceLanguage(_ value: SourceLanguage) {
@@ -26,73 +49,47 @@ final class TranslationViewModel: ObservableObject {
         if shouldRetranslate { beginTranslation() }
     }
 
-    private(set) var direction: TranslationDirection {
-        get {
-            TranslationDirection(rawValue: UserDefaults.standard.string(forKey: "translationDirection") ?? "") ?? .automatic
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "translationDirection") }
+    var direction: TranslationDirection {
+        TranslationDirection(rawValue: defaults.string(forKey: "translationDirection") ?? "") ?? .automatic
     }
 
     func beginTranslation(text: String? = nil) {
         if text != nil { sourceLanguage = .automatic }
         let value = (text ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
-        let previousConfiguration = configuration
         cancel()
         inputText = value
         result = nil
         errorMessage = nil
         copied = false
-        guard !value.isEmpty else { show(error: BenError.emptyText); return }
-        guard value.count <= 5_000 else { show(error: BenError.textTooLong); return }
+        guard !value.isEmpty else { errorMessage = BenError.emptyText.localizedDescription; return }
+        guard value.count <= 5_000 else { errorMessage = BenError.textTooLong.localizedDescription; return }
         let source = sourceLanguage.identifier ?? LanguageDetection.sourceLanguage(for: value)
         let target = direction.targetLanguage(for: source)
         if LanguageDetection.sameLanguage(source, target) {
             result = TranslationResult(
                 originalText: value, translatedText: value, sourceLanguage: source ?? target,
-                targetLanguage: target, providerID: TranslationProviderID.apple.rawValue
+                targetLanguage: target, providerID: selectedProvider.rawValue
             )
             errorMessage = "原文已是目标语言。"
             return
         }
-        request = TranslationRequest(text: value, sourceLanguage: source, targetLanguage: target)
-        translationPhase = .checkingModels
+        let activeRequest = TranslationRequest(text: value, sourceLanguage: source, targetLanguage: target, providerID: selectedProvider)
+        request = activeRequest
         isBusy = true
-        let next = TranslationSession.Configuration(
-            source: source.map { Locale.Language(identifier: $0) },
-            target: Locale.Language(identifier: target)
-        )
-        if var previousConfiguration, previousConfiguration.source == next.source, previousConfiguration.target == next.target {
-            previousConfiguration.invalidate()
-            configuration = previousConfiguration
-        } else {
-            configuration = next
-        }
-    }
-
-    func performTranslation(using session: TranslationSession) async {
-        guard let activeRequest = request else { return }
-        // Prevent a task from an old language configuration from claiming a newer request.
-        let configuredSource = activeRequest.sourceLanguage.map { Locale.Language(identifier: $0) }
-        guard session.sourceLanguage == configuredSource,
-              session.targetLanguage == Locale.Language(identifier: activeRequest.targetLanguage) else { return }
-        do {
-            let provider = AppleTranslationProvider(session: session) { [weak self] phase in
-                guard let self, self.request?.id == activeRequest.id,
-                      self.isBusy, !Task.isCancelled else { return }
-                self.translationPhase = phase
-            }
-            let translated = try await provider.translate(activeRequest)
-            guard request?.id == activeRequest.id, !Task.isCancelled else { return }
-            result = translated
-            errorMessage = nil
-            isBusy = false
-        } catch {
-            guard request?.id == activeRequest.id else { return }
-            isBusy = false
-            if error is CancellationError || Task.isCancelled {
-                errorMessage = "翻译已取消，可以重试。"
-            } else {
-                errorMessage = error.localizedDescription
+        let provider = self.provider
+        translationTask = Task { [weak self] in
+            do {
+                let translated = try await provider.translate(activeRequest)
+                guard let self, self.request?.id == activeRequest.id, !Task.isCancelled else { return }
+                self.result = translated
+                self.errorMessage = nil
+                self.isBusy = false
+                self.translationTask = nil
+            } catch {
+                guard let self, self.request?.id == activeRequest.id, !Task.isCancelled else { return }
+                self.isBusy = false
+                self.translationTask = nil
+                self.errorMessage = error is CancellationError ? "翻译已取消，可以重试。" : error.localizedDescription
             }
         }
     }
@@ -106,9 +103,10 @@ final class TranslationViewModel: ObservableObject {
     }
 
     func cancel() {
+        translationTask?.cancel()
+        translationTask = nil
         request = nil
         isBusy = false
-        configuration = nil
     }
 
     func copyResult() {

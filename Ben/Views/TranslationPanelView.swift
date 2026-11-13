@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import Translation
 
 struct TranslationPanelView: View {
     @ObservedObject var model: TranslationViewModel
@@ -26,7 +25,8 @@ struct TranslationPanelView: View {
                 HStack(spacing: 8) {
                     Image("BrandMark").resizable().scaledToFit().frame(width: 26, height: 26)
                     Text("Ben").font(.system(size: 14, weight: .semibold))
-                    Text("系统翻译 · 本地").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("\(model.displayedProvider.title) · \(model.displayedProvider.kind)")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer(minLength: 8)
                 }
                 .contentShape(Rectangle())
@@ -90,12 +90,8 @@ struct TranslationPanelView: View {
                 Divider()
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.translationPhase.title).font(.system(size: 12, weight: .medium))
-                        if let detail = model.translationPhase.detail {
-                            Text(detail).font(.system(size: 10)).foregroundStyle(.secondary)
-                        }
-                    }
+                    Text("正在使用\(model.displayedProvider.title)翻译…")
+                        .font(.system(size: 12, weight: .medium))
                     Spacer()
                     Button("取消") { model.cancel() }.controlSize(.small)
                 }
@@ -145,9 +141,6 @@ struct TranslationPanelView: View {
                     .onChange(of: geometry.size.height) { _, height in resize(height) }
             }
         }
-        .translationTask(model.configuration) { session in
-            await model.performTranslation(using: session)
-        }
         .onExitCommand(perform: close)
     }
 
@@ -170,6 +163,7 @@ struct TranslationPanelView: View {
     }
 
     private func languageName(_ identifier: String) -> String {
-        Locale(identifier: "zh-Hans").localizedString(forLanguageCode: identifier) ?? identifier
+        if identifier == "auto" { return "自动识别" }
+        return Locale(identifier: "zh-Hans").localizedString(forLanguageCode: identifier) ?? identifier
     }
 }

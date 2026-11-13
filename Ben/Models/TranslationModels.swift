@@ -6,12 +6,14 @@ struct TranslationRequest: Identifiable, Sendable {
     let text: String
     let sourceLanguage: String?
     let targetLanguage: String
+    let providerID: TranslationProviderID
 
-    init(text: String, sourceLanguage: String?, targetLanguage: String) {
+    init(text: String, sourceLanguage: String?, targetLanguage: String, providerID: TranslationProviderID) {
         id = UUID()
         self.text = text
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
+        self.providerID = providerID
     }
 }
 
@@ -21,22 +23,6 @@ struct TranslationResult: Sendable {
     let sourceLanguage: String
     let targetLanguage: String
     let providerID: String
-}
-
-enum TranslationPhase {
-    case checkingModels, preparingModels, translating
-
-    var title: String {
-        switch self {
-        case .checkingModels: "正在检查语言模型…"
-        case .preparingModels: "正在准备语言模型…"
-        case .translating: "正在翻译…"
-        }
-    }
-
-    var detail: String? {
-        self == .preparingModels ? "此语言组合尚未就绪，请按系统提示下载模型。" : nil
-    }
 }
 
 enum TranslationDirection: String, CaseIterable, Identifiable {
@@ -100,7 +86,7 @@ enum SourceLanguage: String, CaseIterable, Identifiable {
 
 enum BenError: LocalizedError {
     case emptyText, textTooLong, permissionRequired, selectionUnavailable
-    case secureInput, unsupportedPair, providerNotConfigured(String)
+    case secureInput
 
     var errorDescription: String? {
         switch self {
@@ -109,8 +95,6 @@ enum BenError: LocalizedError {
         case .permissionRequired: "请在设置中开启 Ben 的辅助功能权限，以读取选中文字。你也可以在这里手动输入。"
         case .selectionUnavailable: "未读取到选中文字。请先选中文字；如果当前软件不支持，可以在这里粘贴后翻译。"
         case .secureInput: "Ben 不会读取密码等安全输入字段。"
-        case .unsupportedPair: "macOS 系统翻译不支持这个语言组合，请尝试其他文字或调整翻译方向。"
-        case .providerNotConfigured(let name): "\(name) 尚未接入。当前版本请使用 macOS 系统翻译。"
         }
     }
 }

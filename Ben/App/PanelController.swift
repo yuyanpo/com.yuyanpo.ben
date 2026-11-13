@@ -87,14 +87,13 @@ final class PanelController {
                 self.hide()
                 return nil
             }
-            if event.type != .keyDown, event.window !== self.panel, !self.model.isBusy {
+            if event.type != .keyDown, event.window !== self.panel {
                 self.hide()
             }
             return event
         }
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            // Keep the hosting view alive while the system presents model-download UI.
-            guard let self, !self.model.isBusy else { return }
+            guard let self else { return }
             self.hide()
         }
     }

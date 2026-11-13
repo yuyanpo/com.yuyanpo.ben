@@ -10,14 +10,26 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("翻译") {
-                LabeledContent("默认服务", value: "macOS 系统翻译")
+                Picker("默认服务", selection: Binding(
+                    get: { model.selectedProvider },
+                    set: { model.selectProvider($0) }
+                )) {
+                    ForEach(TranslationProviderID.allCases) { value in
+                        Text("\(value.title) · \(value.kind)").tag(value)
+                    }
+                }
+                Text(model.selectedProvider.summary)
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("翻译方向", selection: $direction) {
                     ForEach(TranslationDirection.allCases) { value in
                         Text(value.title).tag(value.rawValue)
                     }
                 }
-                Text("在设备上翻译。首次使用某个语言组合时，系统可能需要联网下载模型；安装后可离线使用。")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("翻译时会联网，将原文发送给所选服务。切换服务后，下次翻译生效；失败时不会自动切换。")
+                    Text("不保存翻译历史，不记录原文和译文。公开免费接口可能限流或调整。")
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
             Section("全局快捷键") {
                 LabeledContent("选词翻译", value: "⌥ C")
@@ -49,11 +61,6 @@ struct SettingsView: View {
                         NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
                     }
                 }
-            }
-            Section("后续服务") {
-                Text("第三方翻译 API · 大模型翻译")
-                Text("接口结构已预留，当前版本尚未接入。系统翻译失败时不会自动上传文本到其他服务。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        model.cancel()
         shortcut.unregister()
         NotificationCenter.default.removeObserver(self)
     }
