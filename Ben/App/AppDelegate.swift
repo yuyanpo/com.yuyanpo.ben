@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let reader = SelectedTextReader()
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private var selectionTask: Task<Void, Never>?
+    private var selectionID: UUID?
     private lazy var panel = PanelController(model: model) { [weak self] in self?.showSettings() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -16,6 +18,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        #if DEBUG
+        if CommandLine.arguments.contains("--check-selection") {
+            NSApp.setActivationPolicy(.accessory)
+            selectionTask = Task { [weak self] in
+                guard let self else { return }
+                let diagnosticReader: SelectedTextReader
+                if let flag = CommandLine.arguments.firstIndex(of: "--selection-app"),
+                   CommandLine.arguments.indices.contains(flag + 1) {
+                    let bundleID = CommandLine.arguments[flag + 1]
+                    diagnosticReader = SelectedTextReader {
+                        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
+                    }
+                } else {
+                    diagnosticReader = self.reader
+                }
+                do {
+                    let text = try await diagnosticReader.readSelection()
+                    print("Selection: available (\(text.count) characters)")
+                } catch {
+                    print("Selection: unavailable (\(error.localizedDescription))")
+                }
+                NSApp.terminate(nil)
+            }
+            return
+        }
+        #endif
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         model.shortcutError = shortcut.register()
@@ -25,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        selectionTask?.cancel()
         model.cancel()
         shortcut.unregister()
         NotificationCenter.default.removeObserver(self)
@@ -61,21 +90,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func translateSelection() {
         let point = NSEvent.mouseLocation
+        selectionTask?.cancel()
+        model.cancel()
+        let id = UUID()
+        selectionID = id
         // Read before presenting our panel, while the original application still owns focus.
-        do {
-            let selected = try reader.readSelection()
-            model.beginTranslation(text: selected)
-        } catch {
-            model.show(error: error)
+        selectionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let selected = try await self.reader.readSelection()
+                guard self.selectionID == id, !Task.isCancelled else { return }
+                self.model.beginTranslation(text: selected)
+            } catch {
+                guard self.selectionID == id, !Task.isCancelled else { return }
+                self.model.show(error: error)
+            }
+            self.selectionTask = nil
+            self.panel.show(near: point)
         }
-        panel.show(near: point)
     }
 
     @objc private func showManualTranslation() {
+        cancelSelection()
         panel.show(near: NSEvent.mouseLocation)
     }
 
     @objc private func showSettings() {
+        cancelSelection()
         reader.refreshPermission()
         if settingsWindow == nil {
             let window = NSWindow(
@@ -99,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
+        cancelSelection()
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         let description = NSAttributedString(
@@ -120,4 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
+
+    private func cancelSelection() {
+        selectionTask?.cancel()
+        selectionTask = nil
+        selectionID = nil
+    }
 }
