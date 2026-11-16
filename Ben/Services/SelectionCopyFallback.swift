@@ -5,11 +5,16 @@ import Carbon
 /// A single shortcut-triggered copy transaction, never an idle clipboard monitor.
 @MainActor
 struct SelectionCopyFallback {
+    enum CopyMenuResult {
+        case performed, unavailable, disabled
+    }
+
     private static var transactionInProgress = false
     let pasteboard: NSPasteboard
     let isCurrentApplication: () -> Bool
     let requiresEditorMetadata: Bool
-    let copy: () -> Bool
+    let copyMenu: () -> CopyMenuResult
+    let copyKeyboard: () -> Bool
 
     func readSelection() async throws -> String {
         // A cancelled request may still have a Copy event in flight. Serialize
@@ -36,24 +41,52 @@ struct SelectionCopyFallback {
                 if !originals.isEmpty { pasteboard.writeObjects(originals) }
             }
         }
-        guard copy() else { throw BenError.selectionUnavailable }
-        let deadline = ContinuousClock.now.advanced(by: .milliseconds(800))
+        switch copyMenu() {
+        case .disabled:
+            throw BenError.selectionUnavailable
+        case .performed:
+            if let text = try await waitForCopiedText(since: originalCount, timeout: .milliseconds(300),
+                                                      copiedCount: &copiedCount) { return text }
+        case .unavailable:
+            break
+        }
+        try Task.checkCancellation()
+        guard isCurrentApplication(), !IsSecureEventInputEnabled(),
+              pasteboard.changeCount == (copiedCount ?? originalCount),
+              try await Self.waitForShortcutRelease(isCurrentApplication: isCurrentApplication),
+              pasteboard.changeCount == (copiedCount ?? originalCount) else {
+            throw BenError.selectionUnavailable
+        }
+        // AXPress success only means the menu accepted the action. Some apps
+        // produce no text until Command+C travels through the session event path.
+        let keyboardBaseline = pasteboard.changeCount
+        guard copyKeyboard() else { throw BenError.selectionUnavailable }
+        if let text = try await waitForCopiedText(since: keyboardBaseline, timeout: .milliseconds(800),
+                                                  copiedCount: &copiedCount) { return text }
+        throw BenError.selectionUnavailable
+    }
+
+    private func waitForCopiedText(since baseline: Int, timeout: Duration,
+                                  copiedCount: inout Int?) async throws -> String? {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        var observedCount: Int?
         while ContinuousClock.now < deadline {
             // Capture our completed copy before checking cancellation so its
             // clipboard can still be restored if a newer request replaces it.
-            if copiedCount == nil, pasteboard.changeCount != originalCount {
+            if observedCount == nil, pasteboard.changeCount != baseline {
+                observedCount = pasteboard.changeCount
                 copiedCount = pasteboard.changeCount
             }
             // If cancelled after dispatch, drain the in-flight Copy within the
             // same deadline before releasing the transaction to a new request.
             if Task.isCancelled || !isCurrentApplication() {
-                if copiedCount != nil { break }
+                if observedCount != nil { break }
                 // Task.sleep throws immediately in a cancelled task; use an
                 // uncancelled sleeper to avoid spinning on the main actor.
                 await Self.cleanupDelay()
                 continue
             }
-            if let observedCount = copiedCount {
+            if let observedCount {
                 guard pasteboard.changeCount == observedCount else {
                     throw BenError.selectionUnavailable
                 }
@@ -67,17 +100,18 @@ struct SelectionCopyFallback {
                         throw BenError.selectionUnavailable
                     }
                 }
-                guard let text = pasteboard.string(forType: .string),
-                      pasteboard.changeCount == observedCount,
-                      let selected = try SelectedTextReader.validatedText(text) else {
-                    throw BenError.selectionUnavailable
+                let text = pasteboard.string(forType: .string)
+                guard pasteboard.changeCount == observedCount else { throw BenError.selectionUnavailable }
+                if let text, let selected = try SelectedTextReader.validatedText(text) {
+                    return selected
                 }
-                return selected
+                return nil
             }
             try? await Task.sleep(for: .milliseconds(20))
         }
         try Task.checkCancellation()
-        throw BenError.selectionUnavailable
+        guard isCurrentApplication() else { throw BenError.selectionUnavailable }
+        return nil
     }
 
     private static func cleanupDelay() async {
@@ -137,14 +171,14 @@ struct SelectionCopyFallback {
     }
 
     /// Prefer the app's explicit Copy command, independent of UI language.
-    private static func pressCopyMenu(in application: AXUIElement, isCurrentApplication: () -> Bool) -> Bool? {
+    static func pressCopyMenu(in application: AXUIElement, isCurrentApplication: () -> Bool) -> CopyMenuResult {
         func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
             var value: CFTypeRef?
             guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
             return value
         }
         guard let menuValue = attribute(application, kAXMenuBarAttribute),
-              CFGetTypeID(menuValue) == AXUIElementGetTypeID() else { return nil }
+              CFGetTypeID(menuValue) == AXUIElementGetTypeID() else { return .unavailable }
         var queue: [(AXUIElement, Int)] = [(unsafeDowncast(menuValue, to: AXUIElement.self), 0)]
         var visited = 0
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))
@@ -153,15 +187,15 @@ struct SelectionCopyFallback {
             visited += 1
             if (attribute(element, kAXMenuItemCmdCharAttribute) as? String)?.lowercased() == "c",
                attribute(element, kAXMenuItemCmdModifiersAttribute) as? Int == 0 {
-                guard attribute(element, kAXEnabledAttribute) as? Bool == true else { return false }
-                guard isCurrentApplication(), !IsSecureEventInputEnabled() else { return false }
-                return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success ? true : nil
+                guard attribute(element, kAXEnabledAttribute) as? Bool == true else { return .disabled }
+                guard isCurrentApplication(), !IsSecureEventInputEnabled() else { return .unavailable }
+                return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success ? .performed : .unavailable
             }
             if depth < 4, let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
                 queue.append(contentsOf: children.map { ($0, depth + 1) })
             }
         }
-        return nil
+        return .unavailable
     }
 
     private static func waitForShortcutRelease(isCurrentApplication: () -> Bool) async throws -> Bool {
@@ -177,21 +211,20 @@ struct SelectionCopyFallback {
         return isCurrentApplication()
     }
 
-    static func pressCopy(in application: AXUIElement, processIdentifier: pid_t,
-                          isCurrentApplication: () -> Bool) -> Bool {
-        guard isCurrentApplication(), !IsSecureEventInputEnabled() else { return false }
-        if let performed = pressCopyMenu(in: application, isCurrentApplication: isCurrentApplication) {
-            return performed
-        }
+    static func pressCopyKeyboard(isCurrentApplication: () -> Bool) -> Bool {
+        guard isCurrentApplication(), !IsSecureEventInputEnabled(),
+              CGEventSource.flagsState(.combinedSessionState)
+                .intersection([.maskAlternate, .maskControl, .maskShift, .maskCommand]).isEmpty else { return false }
         guard let source = CGEventSource(stateID: .privateState),
               let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false),
               isCurrentApplication(), !IsSecureEventInputEnabled() else { return false }
         down.flags = .maskCommand
         up.flags = .maskCommand
-        // Target the captured PID, never whichever app happens to be foreground later.
-        down.postToPid(processIdentifier)
-        up.postToPid(processIdentifier)
+        // Follow normal keyboard routing so embedded web views receive the copy
+        // command. Recheck foreground immediately before posting the event pair.
+        down.post(tap: .cgSessionEventTap)
+        up.post(tap: .cgSessionEventTap)
         return true
     }
 }

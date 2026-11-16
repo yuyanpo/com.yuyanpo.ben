@@ -117,8 +117,19 @@ final class SelectedTextReader: ObservableObject {
                 !application.isTerminated
             },
             requiresEditorMetadata: isEditor,
-            copy: {
-                SelectionCopyFallback.pressCopy(in: appElement, processIdentifier: application.processIdentifier) {
+            copyMenu: {
+                #if DEBUG
+                if CommandLine.arguments.contains("--check-selection"),
+                   CommandLine.arguments.contains("--check-keyboard-copy") { return .unavailable }
+                #endif
+                return SelectionCopyFallback.pressCopyMenu(in: appElement) {
+                    self.applicationProvider()?.processIdentifier == application.processIdentifier &&
+                    NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier &&
+                    !application.isTerminated
+                }
+            },
+            copyKeyboard: {
+                SelectionCopyFallback.pressCopyKeyboard {
                     self.applicationProvider()?.processIdentifier == application.processIdentifier &&
                     NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier &&
                     !application.isTerminated
