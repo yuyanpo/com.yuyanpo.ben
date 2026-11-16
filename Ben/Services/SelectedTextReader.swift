@@ -11,8 +11,8 @@ final class SelectedTextReader: ObservableObject {
         self.applicationProvider = applicationProvider
     }
 
-    // Monaco editors can omit their AX selection. Only these editors may use
-    // the copy fallback with their explicit selection metadata.
+    // Monaco editors can copy a whole line without selection. Their copy
+    // fallback must include explicit non-empty-selection metadata.
     static let editorBundleIDs: Set<String> = [
         "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders",
         "com.todesktop.230313mzl4w4u92"
@@ -41,16 +41,31 @@ final class SelectedTextReader: ObservableObject {
         // Bound unresponsive-app IPC so a shortcut cannot freeze Ben indefinitely.
         AXUIElementSetMessagingTimeout(appElement, 0.2)
         let isEditor = Self.editorBundleIDs.contains(application.bundleIdentifier ?? "")
-        for attempt in 0..<(isEditor ? 2 : 1) {
+        let isChrome = application.bundleIdentifier == "com.google.Chrome"
+        #if DEBUG
+        // Exercise the actual signed process's copy fallback without translation.
+        let attempts = CommandLine.arguments.contains("--check-selection") &&
+            CommandLine.arguments.contains("--check-copy-selection") ? 0 : 2
+        #else
+        let attempts = 2
+        #endif
+        for attempt in 0..<attempts {
             try Task.checkCancellation()
             guard applicationProvider()?.processIdentifier == application.processIdentifier,
                   !application.isTerminated else { throw BenError.selectionUnavailable }
             if let focused = Self.elementAttribute(appElement, kAXFocusedUIElementAttribute) {
-                // Some editors focus a child of their text element. Search only
-                // its short ancestor chain, never windows or the document tree.
+                // Embedded web views can focus a deeply nested node while exposing
+                // selection only on its AXWebArea. Stay on the focus chain.
                 var candidates = [focused]
-                for _ in 0..<3 {
-                    guard let parent = Self.elementAttribute(candidates.last!, kAXParentAttribute),
+                let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+                for _ in 0..<8 {
+                    guard ContinuousClock.now < deadline else { break }
+                    let current = candidates.last!
+                    let role = Self.stringAttribute(current, kAXRoleAttribute)
+                    // An editable field owns its selection, even when empty.
+                    // Do not fall through from the omnibox to an old page selection.
+                    if Self.isTextInput(role) || role == "AXWebArea" || role == kAXWindowRole as String { break }
+                    guard let parent = Self.elementAttribute(current, kAXParentAttribute),
                           !candidates.contains(where: { CFEqual($0, parent) }) else { break }
                     candidates.append(parent)
                 }
@@ -67,24 +82,49 @@ final class SelectedTextReader: ObservableObject {
                     }
                 }
             }
-            if attempt == 0, isEditor {
-                // Give the editor time to expose its updated tree without
-                // activating Ben or blocking the main run loop.
-                try await Task.sleep(for: .milliseconds(80))
-            }
-        }
-        if isEditor {
-            return try await EditorCopyFallback(
-                pasteboard: .general,
-                isCurrentApplication: { self.applicationProvider()?.processIdentifier == application.processIdentifier },
-                copy: {
-                    EditorCopyFallback.pressCopy(in: appElement) {
-                        self.applicationProvider()?.processIdentifier == application.processIdentifier
+            if attempt == 0 {
+                // Electron exposes this attribute for assistive clients. Ask
+                // only when supported; never enable unrelated OS settings.
+                let manual = "AXManualAccessibility" as CFString
+                var manuallySettable = DarwinBoolean(false)
+                if AXUIElementIsAttributeSettable(appElement, manual, &manuallySettable) == .success,
+                   manuallySettable.boolValue,
+                   (Self.attribute(appElement, "AXManualAccessibility") as? Bool) != true {
+                    AXUIElementSetAttributeValue(appElement, manual, kCFBooleanTrue)
+                }
+                var enabledChromeAccessibility = false
+                if isChrome {
+                    // Chromium lazily enables its complete accessibility tree.
+                    // Request it only when needed, without changing OS settings.
+                    let name = "AXEnhancedUserInterface" as CFString
+                    var settable = DarwinBoolean(false)
+                    if AXUIElementIsAttributeSettable(appElement, name, &settable) == .success,
+                       settable.boolValue,
+                       (Self.attribute(appElement, "AXEnhancedUserInterface") as? Bool) != true {
+                        enabledChromeAccessibility = AXUIElementSetAttributeValue(appElement, name, kCFBooleanTrue) == .success
                     }
                 }
-            ).readSelection()
+                // Chromium debounces its first complete-tree request for two seconds.
+                // Await it without activating Ben or blocking the main run loop.
+                try await Task.sleep(for: .milliseconds(enabledChromeAccessibility ? 2_200 : 80))
+            }
         }
-        throw BenError.selectionUnavailable
+        return try await SelectionCopyFallback(
+            pasteboard: .general,
+            isCurrentApplication: {
+                self.applicationProvider()?.processIdentifier == application.processIdentifier &&
+                NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier &&
+                !application.isTerminated
+            },
+            requiresEditorMetadata: isEditor,
+            copy: {
+                SelectionCopyFallback.pressCopy(in: appElement, processIdentifier: application.processIdentifier) {
+                    self.applicationProvider()?.processIdentifier == application.processIdentifier &&
+                    NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier &&
+                    !application.isTerminated
+                }
+            }
+        ).readSelection()
     }
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -102,9 +142,14 @@ final class SelectedTextReader: ObservableObject {
         attribute(element, name) as? String
     }
 
+    private static func isTextInput(_ role: String?) -> Bool {
+        role == kAXTextFieldRole as String || role == kAXTextAreaRole as String || role == kAXComboBoxRole as String
+    }
+
     private static func selectedText(in element: AXUIElement) throws -> String? {
         if let text = stringAttribute(element, kAXSelectedTextAttribute),
            let selected = try validatedText(text) { return selected }
+        if let selected = try selectedMarkerText(in: element) { return selected }
         guard let value = attribute(element, kAXSelectedTextRangeAttribute),
               CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         let selection = unsafeDowncast(value, to: AXValue.self)
@@ -121,6 +166,25 @@ final class SelectedTextReader: ObservableObject {
         guard let value = stringAttribute(element, kAXValueAttribute), value.utf16.count <= 1_048_576,
               let selected = substring(value, range: range) else { return nil }
         return try validatedText(selected)
+    }
+
+    private static func selectedMarkerText(in element: AXUIElement) throws -> String? {
+        // Web selections use opaque text markers and may span multiple DOM nodes.
+        // Pass the marker back to AX; never interpret its internal bytes as a range.
+        guard stringAttribute(element, kAXRoleAttribute) == "AXWebArea",
+              let range = attribute(element, "AXSelectedTextMarkerRange") else { return nil }
+        var lengthValue: CFTypeRef?
+        if AXUIElementCopyParameterizedAttributeValue(element, "AXLengthForTextMarkerRange" as CFString,
+                                                       range, &lengthValue) == .success,
+           let length = lengthValue as? NSNumber {
+            guard length.intValue > 0 else { return nil }
+            guard length.intValue <= 100_000 else { throw BenError.textTooLong }
+        }
+        var text: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, "AXStringForTextMarkerRange" as CFString,
+                                                        range, &text) == .success,
+              let text = text as? String else { return nil }
+        return try validatedText(text)
     }
 
     static func validatedText(_ text: String) throws -> String? {
