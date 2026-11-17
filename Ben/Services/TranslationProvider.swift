@@ -1,7 +1,7 @@
 import Foundation
 
 enum TranslationProviderID: String, CaseIterable, Identifiable, Sendable {
-    case microsoft, google, bilibili
+    case microsoft, google, bilibili, baidu
 
     var id: String { rawValue }
     var title: String {
@@ -9,6 +9,7 @@ enum TranslationProviderID: String, CaseIterable, Identifiable, Sendable {
         case .microsoft: "微软翻译"
         case .google: "谷歌翻译"
         case .bilibili: "B站翻译"
+        case .baidu: "百度翻译"
         }
     }
     var kind: String { self == .bilibili ? "大模型" : "API" }
@@ -17,6 +18,7 @@ enum TranslationProviderID: String, CaseIterable, Identifiable, Sendable {
         case .microsoft: "通过 Microsoft Edge 翻译接口翻译，无需填写 Key。"
         case .google: "通过 Google Translate 翻译接口翻译，无需填写 Key。"
         case .bilibili: "使用 B站 Index-Translate 大模型的公开免费接口，无需填写 Key。"
+        case .baidu: "使用百度网页版翻译，无需填写 Key。查词可显示音标、词性释义、词形和标签。"
         }
     }
 }
@@ -28,6 +30,7 @@ protocol TranslationProvider: Sendable {
 enum TranslationServiceError: LocalizedError {
     case http(Int, retryAfter: TimeInterval?)
     case invalidResponse, incompleteResponse, responseTooLarge, timedOut, networkUnavailable
+    case baiduRejected, unsupportedLanguage
 
     var errorDescription: String? {
         switch self {
@@ -39,11 +42,13 @@ enum TranslationServiceError: LocalizedError {
         case .responseTooLarge: "服务返回的内容过长，请缩短文本后重试。"
         case .timedOut: "翻译请求超时，请检查网络后重试。"
         case .networkUnavailable: "无法连接翻译服务，请检查网络或手动切换服务。"
+        case .baiduRejected: "百度翻译拒绝了请求，可能需要网页验证或接口已调整。请稍后重试或手动切换服务。"
+        case .unsupportedLanguage: "当前服务不支持此语种，请手动切换服务。"
         }
     }
 }
 
-/// One reusable session, no cookies or disk cache. Only the requested provider receives text.
+/// Reusable sessions and bounded memory cache. Baidu keeps its anonymous cookies separately.
 actor OnlineTranslationProvider: TranslationProvider {
     private struct CacheKey: Hashable {
         let provider: TranslationProviderID
@@ -58,6 +63,7 @@ actor OnlineTranslationProvider: TranslationProvider {
     }
 
     private let session: URLSession
+    private let baiduProvider: BaiduTranslationProvider
     private var cache: [CacheKey: CacheEntry] = [:]
     private var cacheCost = 0
     private var access: UInt64 = 0
@@ -65,6 +71,7 @@ actor OnlineTranslationProvider: TranslationProvider {
     private static let maximumBodyBytes = 1_048_576
 
     init(session: URLSession? = nil) {
+        baiduProvider = BaiduTranslationProvider(session: session)
         if let session {
             self.session = session
         } else {
@@ -98,6 +105,7 @@ actor OnlineTranslationProvider: TranslationProvider {
             case .microsoft: result = try await microsoft(request)
             case .google: result = try await google(request)
             case .bilibili: result = try await bilibili(request)
+            case .baidu: result = try await baiduProvider.translate(request)
             }
         } catch TranslationServiceError.http(429, let delay) {
             retryDates[request.providerID] = Date().addingTimeInterval(delay ?? 60)
@@ -109,7 +117,7 @@ actor OnlineTranslationProvider: TranslationProvider {
     }
 
     private func store(_ result: TranslationResult, for key: CacheKey) {
-        let cost = key.text.utf8.count + result.translatedText.utf8.count
+        let cost = key.text.utf8.count + result.translatedText.utf8.count + (result.dictionary?.cacheCost ?? 0)
         guard cost <= Self.maximumBodyBytes else { return }
         if let previous = cache.removeValue(forKey: key) { cacheCost -= previous.cost }
         while cache.count >= 128 || cacheCost + cost > Self.maximumBodyBytes {
@@ -249,7 +257,7 @@ actor OnlineTranslationProvider: TranslationProvider {
         }
     }
 
-    private static func download(_ request: URLRequest, session: URLSession) async throws -> Data {
+    static func download(_ request: URLRequest, session: URLSession) async throws -> Data {
         try Task.checkCancellation()
         let (bytes, response) = try await session.bytes(for: request)
         defer { bytes.task.cancel() }

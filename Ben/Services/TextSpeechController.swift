@@ -3,7 +3,7 @@ import Combine
 import Foundation
 
 enum TranslationTextSection: Sendable {
-    case original, translation
+    case original, translation, britishPronunciation, americanPronunciation
 }
 
 /// Uses macOS speech voices; never sends text to a translation service.

@@ -23,6 +23,27 @@ struct TranslationResult: Sendable {
     let sourceLanguage: String
     let targetLanguage: String
     let providerID: String
+    var dictionary: DictionaryEntry? = nil
+}
+
+struct DictionaryEntry: Sendable, Codable {
+    struct Meaning: Sendable, Codable {
+        let partOfSpeech: String
+        let definitions: [String]
+    }
+    struct WordForm: Sendable, Codable {
+        let label: String
+        let words: [String]
+    }
+
+    let word: String
+    let britishPhonetic: String?
+    let americanPhonetic: String?
+    let meanings: [Meaning]
+    let forms: [WordForm]
+    let tags: [String]
+
+    var cacheCost: Int { (try? JSONEncoder().encode(self).count) ?? 0 }
 }
 
 enum TranslationDirection: String, CaseIterable, Identifiable {
