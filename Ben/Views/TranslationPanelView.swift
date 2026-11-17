@@ -4,7 +4,7 @@ import SwiftUI
 struct TranslationPanelView: View {
     @ObservedObject var model: TranslationViewModel
     @ObservedObject private var speech: TextSpeechController
-    @Environment(\.colorScheme) private var colorScheme
+    @State private var dictionaryContentHeight: CGFloat = 280
     let close: () -> Void
     let openSettings: () -> Void
     let resize: (CGFloat) -> Void
@@ -23,32 +23,11 @@ struct TranslationPanelView: View {
     }
 
     private let contentWidth: CGFloat = 372
-    private var dictionaryTagColor: Color {
-        colorScheme == .dark
-            ? Color(red: 0.67, green: 0.69, blue: 0.85)
-            : Color(red: 0.48, green: 0.51, blue: 0.66)
-    }
     private var inputHeight: CGFloat {
         min(128, max(52, textHeight(model.inputText, size: 14) + 18))
     }
     private var resultHeight: CGFloat {
         min(220, max(24, textHeight(model.result?.translatedText ?? "", size: 17) + 4))
-    }
-    private var dictionaryHeight: CGFloat {
-        guard let entry = model.result?.dictionary else { return 0 }
-        let meanings = entry.meanings.reduce(CGFloat(0)) { height, meaning in
-            height + textHeight(meaning.definitions.joined(separator: "；"), size: 14, width: contentWidth - 48) + 12
-        }
-        let formSizes = entry.forms.map { form in
-            let text = "\(form.label)：\(form.words.joined(separator: "、"))"
-            return NSSize(width: textWidth(text, size: 11) + 4, height: 16)
-        }
-        let forms = entry.forms.isEmpty ? 0 : DictionaryFlowLayout(spacing: 10, rowSpacing: 6)
-            .arrangement(sizes: formSizes, width: contentWidth).size.height + 12
-        let tagSizes = entry.tags.map { NSSize(width: textWidth($0, size: 10) + 16, height: 22) }
-        let tags = entry.tags.isEmpty ? 0 : DictionaryFlowLayout(spacing: 6, rowSpacing: 6)
-            .arrangement(sizes: tagSizes, width: contentWidth).size.height + 12
-        return min(280, max(80, 76 + meanings + forms + tags))
     }
     private var sourceTitle: String {
         let name = model.detectedSourceLanguage.map(languageName) ?? "语种"
@@ -61,7 +40,7 @@ struct TranslationPanelView: View {
                 HStack(spacing: 8) {
                     Image("BrandMark").resizable().scaledToFit().frame(width: 26, height: 26)
                     Text("Ben").font(.system(size: 14, weight: .semibold))
-                    Text("\(model.displayedProvider.title) · \(model.displayedProvider.kind)")
+                    Text(model.displayedProvider.title)
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer(minLength: 8)
                 }
@@ -97,8 +76,9 @@ struct TranslationPanelView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
                     .menuIndicator(.hidden)
+                    .buttonStyle(PanelToolButtonStyle(circular: false, filled: false))
                     .fixedSize()
                     .help("识别不准确时，可手动选择原文语种")
                 }
@@ -107,9 +87,10 @@ struct TranslationPanelView: View {
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .frame(height: inputHeight)
-                    .background(Color(nsColor: .textBackgroundColor).opacity(0.65),
+                    .background(Color(nsColor: .textBackgroundColor),
                                 in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.06)))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(.primary.opacity(0.14), lineWidth: 1))
                     .overlay(alignment: .topLeading) {
                         if model.inputText.isEmpty {
                             Text("输入翻译的文字")
@@ -145,30 +126,27 @@ struct TranslationPanelView: View {
                     Text("正在使用\(model.displayedProvider.title)翻译…")
                         .font(.system(size: 12, weight: .medium))
                     Spacer()
-                    Button("取消") { model.cancel() }.controlSize(.small)
+                    Button("取消") { model.cancel() }
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .buttonStyle(PanelToolButtonStyle(circular: false))
                 }
             } else if let result = model.result {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(result.dictionary == nil ? "译文" : "词典").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("译文").font(.system(size: 11)).foregroundStyle(.secondary)
                         Spacer()
                         Text("\(languageName(result.sourceLanguage)) → \(languageName(result.targetLanguage))")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     ScrollView {
-                        if let dictionary = result.dictionary {
-                            dictionaryContent(dictionary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text(result.translatedText)
-                                .font(.system(size: 17))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 2)
-                        }
+                        Text(result.translatedText)
+                            .font(.system(size: 17))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 2)
                     }
-                    .frame(height: result.dictionary == nil ? resultHeight : dictionaryHeight)
+                    .frame(height: resultHeight)
                     HStack(spacing: 8) {
                         speechButton(section: .translation, text: result.translatedText,
                                      language: result.targetLanguage)
@@ -180,6 +158,24 @@ struct TranslationPanelView: View {
                             Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                    }
+                }
+                if let dictionary = result.dictionary {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("词典").font(.system(size: 11)).foregroundStyle(.secondary)
+                        ScrollView {
+                            dictionaryContent(dictionary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .onGeometryChange(for: CGFloat.self) { geometry in
+                                    ceil(geometry.size.height)
+                                } action: { height in
+                                    if height.isFinite, height > 0 {
+                                        dictionaryContentHeight = height
+                                    }
+                                }
+                        }
+                        .frame(height: min(280, dictionaryContentHeight))
                     }
                 }
             } else if let error = model.errorMessage {
@@ -209,14 +205,16 @@ struct TranslationPanelView: View {
             Text(entry.word)
                 .font(.system(size: 20, weight: .semibold))
                 .textSelection(.enabled)
-            HStack(spacing: 14) {
-                if let phonetic = entry.britishPhonetic {
-                    pronunciation("英", phonetic: phonetic, word: entry.word,
-                                  language: "en-GB", section: .britishPronunciation)
-                }
-                if let phonetic = entry.americanPhonetic {
-                    pronunciation("美", phonetic: phonetic, word: entry.word,
-                                  language: "en-US", section: .americanPronunciation)
+            if entry.britishPhonetic != nil || entry.americanPhonetic != nil {
+                HStack(spacing: 14) {
+                    if let phonetic = entry.britishPhonetic {
+                        pronunciation("英", phonetic: phonetic, word: entry.word,
+                                      language: "en-GB", section: .britishPronunciation)
+                    }
+                    if let phonetic = entry.americanPhonetic {
+                        pronunciation("美", phonetic: phonetic, word: entry.word,
+                                      language: "en-US", section: .americanPronunciation)
+                    }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -224,9 +222,10 @@ struct TranslationPanelView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if !meaning.partOfSpeech.isEmpty {
                             Text(meaning.partOfSpeech)
-                                .font(.system(size: 12, design: .serif).italic())
+                                .font(dictionaryMeaningLabelFont(meaning.partOfSpeech))
                                 .foregroundStyle(.secondary.opacity(0.75))
-                                .frame(width: 26, alignment: .leading)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .frame(minWidth: 26, alignment: .leading)
                         }
                         Text(meaning.definitions.joined(separator: "；"))
                             .font(.system(size: 14))
@@ -254,11 +253,11 @@ struct TranslationPanelView: View {
                 DictionaryFlowLayout(spacing: 6, rowSpacing: 6) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Text(tag)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(dictionaryTagColor)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(dictionaryTagColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
                     }
                 }
             }
@@ -275,23 +274,37 @@ struct TranslationPanelView: View {
             Button {
                 speech.toggle(text: word, language: language, section: section)
             } label: {
-                Image(systemName: active ? "stop.fill" : "speaker.wave.2")
+                SpeechSymbol(active: active)
                     .font(.system(size: 10)).frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(active ? Color.accentColor : Color.secondary)
+            .buttonStyle(PanelToolButtonStyle(active: active, filled: false))
             .help(active ? "停止朗读" : "使用系统语音朗读\(label)音")
             .accessibilityLabel("\(label)音朗读")
         }
     }
 
+    private func dictionaryMeaningLabelFont(_ label: String) -> Font {
+        if label.unicodeScalars.allSatisfy({ $0.isASCII }) {
+            return .system(size: 12, design: .serif).italic()
+        }
+        return .system(size: 14)
+    }
+
     private func speechButton(section: TranslationTextSection, text: String, language: String?) -> some View {
         let active = speech.speakingSection == section
         let name = section == .original ? "原文" : "译文"
-        return toolButton(active ? "stop.fill" : "speaker.wave.2",
-                          help: active ? "停止朗读\(name)" : "朗读\(name)", active: active) {
+        let help = active ? "停止朗读\(name)" : "朗读\(name)"
+        return Button {
             speech.toggle(text: text, language: language, section: section)
+        } label: {
+            SpeechSymbol(active: active)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
         }
+        .buttonStyle(PanelToolButtonStyle(active: active))
+        .help(help).accessibilityLabel(help)
+        .accessibilityValue(active ? "正在朗读" : "未播放")
     }
 
     private func toolButton(_ symbol: String, help: String, active: Bool = false,
@@ -311,7 +324,7 @@ struct TranslationPanelView: View {
             Image(systemName: symbol).font(.system(size: 12))
                 .frame(width: 24, height: 24).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).foregroundStyle(.secondary)
+        .buttonStyle(PanelToolButtonStyle(circular: false, filled: false))
         .help(help).accessibilityLabel(help)
     }
 
@@ -322,10 +335,6 @@ struct TranslationPanelView: View {
             attributes: [.font: NSFont.systemFont(ofSize: size)]
         )
         return ceil(rect.height)
-    }
-
-    private func textWidth(_ text: String, size: CGFloat) -> CGFloat {
-        ceil((text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width)
     }
 
     private func languageName(_ identifier: String) -> String {
@@ -382,16 +391,60 @@ private struct DictionaryFlowLayout: Layout {
     }
 }
 
-private struct PanelToolButtonStyle: ButtonStyle {
+private struct SpeechSymbol: View {
     let active: Bool
-    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Image(systemName: "speaker.wave.2")
+            .symbolEffect(.variableColor.iterative.hideInactiveLayers,
+                          options: .repeating, isActive: active && !reduceMotion)
+    }
+}
+
+private struct PanelToolButtonStyle: ButtonStyle {
+    var active = false
+    var circular = true
+    var filled = true
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(active ? Color.accentColor : Color.secondary)
+        PanelButtonFeedback(label: configuration.label, isPressed: configuration.isPressed,
+                            active: active, circular: circular, filled: filled)
+    }
+}
+
+private struct PanelButtonFeedback<Label: View>: View {
+    let label: Label
+    let isPressed: Bool
+    let active: Bool
+    let circular: Bool
+    let filled: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered = false
+
+    private var feedback: Bool { isEnabled && (hovered || isPressed) }
+    private var background: Color {
+        if active {
+            return Color.blue.opacity(isPressed && isEnabled ? 0.24 : (feedback ? 0.18 : 0.12))
+        }
+        return Color.primary.opacity(isPressed && isEnabled ? 0.14 : (feedback ? 0.08 : (filled ? 0.045 : 0)))
+    }
+
+    var body: some View {
+        label
+            .foregroundStyle(active ? Color.blue : (feedback ? Color.primary : Color.secondary))
             .background {
-                Circle().fill(active ? Color.accentColor.opacity(0.12) : Color.primary.opacity(configuration.isPressed ? 0.12 : 0.045))
+                if circular {
+                    Circle().fill(background)
+                } else {
+                    RoundedRectangle(cornerRadius: 5).fill(background)
+                }
             }
+            .scaleEffect(isPressed && isEnabled && !reduceMotion ? 0.93 : 1)
             .opacity(isEnabled ? 1 : 0.35)
+            .onHover { hovered = $0 }
+            .animation(.easeOut(duration: reduceMotion ? 0 : 0.12), value: hovered)
+            .animation(.easeOut(duration: reduceMotion ? 0 : 0.1), value: isPressed)
     }
 }

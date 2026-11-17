@@ -6,7 +6,7 @@ final class TranslationViewModel: ObservableObject {
     @Published var inputText = "" {
         didSet {
             if inputText != oldValue {
-                copiedOriginal = false
+                resetCopyFeedback(for: .original)
                 speech.stop()
             }
         }
@@ -16,7 +16,7 @@ final class TranslationViewModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var request: TranslationRequest?
     @Published var shortcutError: String?
-    @Published var copied = false
+    @Published private(set) var copied = false
     @Published private(set) var copiedOriginal = false
     @Published private(set) var sourceLanguage = SourceLanguage.automatic
     @Published private(set) var selectedProvider: TranslationProviderID
@@ -24,6 +24,9 @@ final class TranslationViewModel: ObservableObject {
     private let provider: any TranslationProvider
     private let defaults: UserDefaults
     private var translationTask: Task<Void, Never>?
+    private var originalCopyResetTask: Task<Void, Never>?
+    private var translationCopyResetTask: Task<Void, Never>?
+    private enum CopySection { case original, translation }
     let speech = TextSpeechController()
 
     init(provider: any TranslationProvider = OnlineTranslationProvider(), defaults: UserDefaults = .standard) {
@@ -113,6 +116,8 @@ final class TranslationViewModel: ObservableObject {
 
     func cancel() {
         speech.stop()
+        resetCopyFeedback(for: .original)
+        resetCopyFeedback(for: .translation)
         translationTask?.cancel()
         translationTask = nil
         request = nil
@@ -122,15 +127,56 @@ final class TranslationViewModel: ObservableObject {
     func copyResult() {
         guard let result else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(result.translatedText, forType: .string)
-        copied = true
+        if NSPasteboard.general.setString(result.translatedText, forType: .string) {
+            showCopyFeedback(for: .translation)
+        }
     }
 
     func copyOriginal() {
         guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(inputText, forType: .string)
-        copiedOriginal = true
+        if NSPasteboard.general.setString(inputText, forType: .string) {
+            showCopyFeedback(for: .original)
+        }
+    }
+
+    private func showCopyFeedback(for section: CopySection) {
+        resetCopyFeedback(for: section)
+        switch section {
+        case .original: copiedOriginal = true
+        case .translation: copied = true
+        }
+        // Each click restarts its own feedback interval; cancelled tasks cannot reset a newer copy.
+        let task = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(2)) }
+            catch { return }
+            guard !Task.isCancelled, let self else { return }
+            switch section {
+            case .original:
+                self.copiedOriginal = false
+                self.originalCopyResetTask = nil
+            case .translation:
+                self.copied = false
+                self.translationCopyResetTask = nil
+            }
+        }
+        switch section {
+        case .original: originalCopyResetTask = task
+        case .translation: translationCopyResetTask = task
+        }
+    }
+
+    private func resetCopyFeedback(for section: CopySection) {
+        switch section {
+        case .original:
+            originalCopyResetTask?.cancel()
+            originalCopyResetTask = nil
+            copiedOriginal = false
+        case .translation:
+            translationCopyResetTask?.cancel()
+            translationCopyResetTask = nil
+            copied = false
+        }
     }
 
     func clearText() {
