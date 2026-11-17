@@ -5,6 +5,7 @@ struct TranslationPanelView: View {
     @ObservedObject var model: TranslationViewModel
     @ObservedObject private var speech: TextSpeechController
     @State private var dictionaryContentHeight: CGFloat = 280
+    @FocusState private var inputFocused: Bool
     let close: () -> Void
     let openSettings: () -> Void
     let resize: (CGFloat) -> Void
@@ -24,7 +25,22 @@ struct TranslationPanelView: View {
 
     private let contentWidth: CGFloat = 372
     private var inputHeight: CGFloat {
-        min(128, max(52, textHeight(model.inputText, size: 14) + 18))
+        let font = NSFont.systemFont(ofSize: 14)
+        // Match the editor's outer padding and native text-container padding.
+        let container = NSTextContainer(size: NSSize(width: contentWidth - 12,
+                                                     height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 5
+        let layout = NSLayoutManager()
+        let storage = NSTextStorage(string: model.inputText + "\u{200B}", attributes: [.font: font])
+        storage.addLayoutManager(layout)
+        layout.addTextContainer(container)
+        layout.ensureLayout(for: container)
+        var lines = 0
+        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, _, _, _, stop in
+            lines += 1
+            if lines == 3 { stop.pointee = true }
+        }
+        return ceil(layout.defaultLineHeight(for: font) * CGFloat(max(1, lines))) + 12
     }
     private var resultHeight: CGFloat {
         min(220, max(24, textHeight(model.result?.translatedText ?? "", size: 17) + 4))
@@ -84,13 +100,16 @@ struct TranslationPanelView: View {
                 }
                 TextEditor(text: $model.inputText)
                     .font(.system(size: 14))
+                    .focused($inputFocused)
+                    .focusEffectDisabled()
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .frame(height: inputHeight)
-                    .background(Color(nsColor: .textBackgroundColor),
+                    .background(Color(nsColor: .textBackgroundColor).opacity(0.65),
                                 in: RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(.primary.opacity(0.14), lineWidth: 1))
+                        .strokeBorder(inputFocused ? Color.blue : Color.primary.opacity(0.14), lineWidth: 1))
                     .overlay(alignment: .topLeading) {
                         if model.inputText.isEmpty {
                             Text("输入翻译的文字")
