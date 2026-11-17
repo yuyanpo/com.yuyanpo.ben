@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Ben — transparent logo</title>
+  <desc>Expanded from reference/logo.svg. The card's A is a transparent cutout. Change the group fill to recolor the foreground; no background is included.</desc>
+  <g fill="#111111" transform="scale(1.6)">
+    <!-- Rounded card, transparent A, and the A's solid counter. -->
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M72 84 H153 A19 19 0 0 1 172 103 V223 A19 19 0 0 1 153 242
+      H72 A19 19 0 0 1 53 223 V103 A19 19 0 0 1 72 84 Z
+      M82.6 199 Q79.5 199 80.5 196 L104.4 129.4
+      Q105.4 126.65 108.2 126.65 H117.4 Q120.1 126.65 121.1 129.4
+      L145.2 195.9 Q146.4 199 143.2 199 H133.7
+      Q131.7 199 131 196.9 L126.8 184.2 H99.1 L94.8 196.9
+      Q94.1 199 92.1 199 H82.6 Z
+      M112.9 145.4 L103.9 171.6 H122.1 Z
+    "/>
+    <!-- Original selection cursor from reference/logo.svg, scaled into the new layout. -->
+    <path transform="translate(46.857143 42.857143) scale(15.142857)" fill-rule="evenodd" clip-rule="evenodd" d="M8.75 1a.75.75 0 0 0 0 1.5h.388a.25.25 0 0 1 .16.058l.952.793v9.298l-.952.793a.25.25 0 0 1-.16.058H8.75a.75.75 0 0 0 0 1.5h.388c.41 0 .806-.143 1.12-.406l.742-.618.742.618a1.75 1.75 0 0 0 1.12.406h.388a.75.75 0 0 0 0-1.5h-.388a.25.25 0 0 1-.16-.058l-.952-.793V3.35l.952-.793a.25.25 0 0 1 .16-.058h.388a.75.75 0 0 0 0-1.5h-.388c-.41 0-.806.144-1.12.406L11 2.024l-.742-.618A1.75 1.75 0 0 0 9.138 1H8.75Z"/>
+  </g>
+</svg>

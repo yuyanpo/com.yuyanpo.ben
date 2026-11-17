@@ -63,7 +63,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             button.image = Self.menuBarMark()
-            button.image?.isTemplate = true
             button.toolTip = "Ben · 选词翻译 ⌥C"
         }
         let menu = NSMenu()
@@ -79,9 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    /// The original logo's foreground, rendered at 1x and 2x without its white tile.
+    /// A 16pt foreground inside an 18pt transparent template, rendered at 1x and 2x.
     private static func menuBarMark() -> NSImage {
-        let image = NSImage(named: "MenuBarMark") ?? NSImage(size: NSSize(width: 18, height: 18))
+        let image = NSImage(resource: .menuBarMark)
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = true
         image.accessibilityDescription = "Ben 翻译"
@@ -152,12 +151,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ]
         )
         NSApp.activate(ignoringOtherApps: true)
-        // Use the original brand image to avoid the system's App icon decoration.
+        // Use the current blue brand image without the system's App icon decoration.
         // AppKit reuses its native panel and reads version/copyright from the bundle.
-        var options: [NSApplication.AboutPanelOptionKey: Any] = [.credits: description]
-        if let logo = NSImage(named: "BrandMark") {
-            options[.applicationIcon] = logo
-        }
+        let logo = NSImage(resource: .brandMark)
+        logo.isTemplate = false
+        let options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .credits: description,
+            .applicationIcon: logo
+        ]
         NSApp.orderFrontStandardAboutPanel(options: options)
     }
 

@@ -37,6 +37,6 @@ xcodebuild -project Ben.xcodeproj -scheme Ben -configuration Debug \
 ## 项目结构
 
 - `Ben/`：应用源码与资源。
-- `scripts/`：开发运行与图标生成脚本。
+- `scripts/`：开发运行与图标生成脚本；`run-dev.sh` 会先生成最新图标，再构建并重启 Debug 应用。
 - `reference/`：原始 Logo；更新后运行 `./scripts/generate-app-icons.sh` 生成图标。
 - `specs/`：[产品需求](specs/PRD.md)与[验收记录](specs/VALIDATION.md)。

@@ -2,6 +2,15 @@
 
 日期：2026-11-12
 
+## 最新 Logo 资源接入（2026-11-17）
+
+- 应用图标使用蓝底（#336DFA）与白色 SVG 前景的 BenIcon；关于面板和翻译浮窗使用当前 BrandMark，菜单栏使用当前 MenuBarMark 透明模板。
+- AppKit / SwiftUI 改用生成的类型化资源引用；浮窗和关于面板保留彩色原图，菜单栏按系统外观渲染模板。
+- run-dev.sh 在构建前调用图标生成脚本，从 reference/logo.svg 更新全部衍生资源；已构建并重启本仓库 Debug 应用，Apple Development 签名严格校验通过。
+- 从最终应用包加载 BrandMark（1024px）与 MenuBarMark（18pt，模板标记有效）并渲染检查；NSWorkspace 系统应用图标也已确认是最新蓝底白色 A 与选区光标。
+- 菜单栏前景缩至 16pt，保持 18pt 画布；已检查 1× / 2× PNG 上下透明边距分别为 1px / 2px，并构建、重启 Debug 应用。
+- CUA 连接 Ben 超时，未取得关于面板和翻译浮窗的实际界面；本次完成资源接入、打包与系统文件图标验证，实际窗口显示仍待真机验收。
+
 ## 已完成
 
 - 环境：macOS 27.0.1、Xcode 27.1、Apple Swift 6.4；工程 Swift language mode 6，deployment target 15.0。

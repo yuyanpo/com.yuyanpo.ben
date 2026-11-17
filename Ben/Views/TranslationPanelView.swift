@@ -54,7 +54,10 @@ struct TranslationPanelView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Image("BrandMark").resizable().scaledToFit().frame(width: 26, height: 26)
+                    Image(.brandMark)
+                        .renderingMode(.original)
+                        .resizable().scaledToFit().frame(width: 26, height: 26)
+                        .accessibilityLabel("Ben")
                     Text("Ben").font(.system(size: 14, weight: .semibold))
                     Text(model.displayedProvider.title)
                         .font(.system(size: 11)).foregroundStyle(.secondary)

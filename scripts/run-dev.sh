@@ -4,6 +4,8 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 app_path="$repo_dir/build/Build/Products/Debug/Ben.app"
 
+"$repo_dir/scripts/generate-app-icons.sh"
+
 xcodebuild -project "$repo_dir/Ben.xcodeproj" -scheme Ben -configuration Debug \
   -destination 'platform=macOS' -derivedDataPath "$repo_dir/build" \
   CODE_SIGNING_ALLOWED=YES build
