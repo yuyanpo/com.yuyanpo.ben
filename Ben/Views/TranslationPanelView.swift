@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TranslationPanelView: View {
     @ObservedObject var model: TranslationViewModel
+    @ObservedObject var shortcuts: GlobalShortcut
     @ObservedObject private var speech: TextSpeechController
     @State private var dictionaryContentHeight: CGFloat = 280
     @FocusState private var inputFocused: Bool
@@ -10,9 +11,10 @@ struct TranslationPanelView: View {
     let openSettings: () -> Void
     let resize: (CGFloat) -> Void
 
-    init(model: TranslationViewModel, close: @escaping () -> Void,
+    init(model: TranslationViewModel, shortcuts: GlobalShortcut, close: @escaping () -> Void,
          openSettings: @escaping () -> Void, resize: @escaping (CGFloat) -> Void) {
         self.model = model
+        self.shortcuts = shortcuts
         speech = model.speech
         self.close = close
         self.openSettings = openSettings
@@ -136,7 +138,7 @@ struct TranslationPanelView: View {
                     toolButton("trash", help: "清空原文和译文", action: model.clearText)
                         .disabled(!hasInput && model.result == nil && model.errorMessage == nil && !model.isBusy)
                     Spacer()
-                    Text("选词 ⌥C · 翻译 ⌘↵")
+                    Text("选词 \(shortcuts.shortcut(for: .selection).display) · 翻译 ⌘↵")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
             }

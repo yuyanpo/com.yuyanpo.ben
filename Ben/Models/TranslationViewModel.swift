@@ -15,7 +15,6 @@ final class TranslationViewModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var isBusy = false
     @Published private(set) var request: TranslationRequest?
-    @Published var shortcutError: String?
     @Published private(set) var copied = false
     @Published private(set) var copiedOriginal = false
     @Published private(set) var sourceLanguage = SourceLanguage.automatic

@@ -13,7 +13,7 @@ final class PanelController {
     private var localMonitor: Any?
     private var globalMonitor: Any?
 
-    init(model: TranslationViewModel, openSettings: @escaping () -> Void) {
+    init(model: TranslationViewModel, shortcuts: GlobalShortcut, openSettings: @escaping () -> Void) {
         self.model = model
         panel = BenPanel(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 180),
@@ -38,7 +38,7 @@ final class PanelController {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let hosting = NSHostingView(rootView: TranslationPanelView(
-            model: model, close: { [weak self] in self?.hide() }, openSettings: openSettings,
+            model: model, shortcuts: shortcuts, close: { [weak self] in self?.hide() }, openSettings: openSettings,
             resize: { [weak self] height in self?.resize(to: height) }
         ))
         hosting.wantsLayer = true
@@ -47,7 +47,7 @@ final class PanelController {
         panel.contentView = hosting
     }
 
-    func show(near point: NSPoint) {
+    func show(near point: NSPoint, focusInput: Bool = false) {
         let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main
         if let bounds = screen?.visibleFrame {
             let size = panel.frame.size
@@ -56,7 +56,22 @@ final class PanelController {
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
         panel.makeKeyAndOrderFront(nil)
+        if focusInput, let content = panel.contentView {
+            // The same hosting view is reused, so onAppear doesn't run on every opening.
+            content.layoutSubtreeIfNeeded()
+            if let editor = inputEditor(in: content) {
+                panel.makeFirstResponder(editor)
+            }
+        }
         installDismissMonitors()
+    }
+
+    private func inputEditor(in view: NSView) -> NSTextView? {
+        if let editor = view as? NSTextView, editor.isEditable { return editor }
+        for child in view.subviews {
+            if let editor = inputEditor(in: child) { return editor }
+        }
+        return nil
     }
 
     func hide() {

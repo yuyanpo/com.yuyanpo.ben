@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -10,7 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var selectionTask: Task<Void, Never>?
     private var selectionID: UUID?
-    private lazy var panel = PanelController(model: model) { [weak self] in self?.showSettings() }
+    private var shortcutMenuItems: [ShortcutAction: NSMenuItem] = [:]
+    private var shortcutSubscription: AnyCancellable?
+    private lazy var panel = PanelController(model: model, shortcuts: shortcut) { [weak self] in self?.showSettings() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--check-accessibility") {
@@ -45,11 +48,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
         NSApp.setActivationPolicy(.accessory)
-        configureStatusItem()
-        model.shortcutError = shortcut.register()
         NotificationCenter.default.addObserver(
             self, selector: #selector(translateSelection), name: .benTranslateSelection, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(showManualTranslation), name: .benTranslateText, object: nil
+        )
+        shortcut.register()
+        configureStatusItem()
+        shortcutSubscription = shortcut.$shortcuts.sink { [weak self] values in
+            self?.updateShortcutMenuItems(values)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -63,19 +72,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             button.image = Self.menuBarMark()
-            button.toolTip = "Ben · 选词翻译 ⌥C"
+            button.toolTip = "Ben · 选词翻译 \(shortcut.shortcut(for: .selection).display)"
         }
         let menu = NSMenu()
-        menu.addItem(withTitle: "翻译文本…", action: #selector(showManualTranslation), keyEquivalent: "")
-        menu.addItem(withTitle: "翻译选中文字  ⌥C", action: #selector(translateSelection), keyEquivalent: "")
+        shortcutMenuItems[.text] = menu.addItem(withTitle: "翻译文本", action: #selector(showManualTranslation), keyEquivalent: "")
+        shortcutMenuItems[.selection] = menu.addItem(withTitle: "翻译选中文字", action: #selector(translateSelection), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
-        menu.addItem(withTitle: "关于 Ben…", action: #selector(showAbout), keyEquivalent: "")
+        menu.addItem(withTitle: "关于 Ben", action: #selector(showAbout), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "退出 Ben", action: #selector(quit), keyEquivalent: "q")
         for menuItem in menu.items { menuItem.target = self }
         item.menu = menu
         statusItem = item
+        updateShortcutMenuItems(shortcut.shortcuts)
+    }
+
+    private func updateShortcutMenuItems(_ values: [ShortcutAction: KeyboardShortcut]) {
+        for (action, item) in shortcutMenuItems {
+            let value = values[action] ?? action.defaultShortcut
+            // AppKit places the shortcut in its native, gray trailing column.
+            item.keyEquivalent = value.menuKeyEquivalent
+            item.keyEquivalentModifierMask = value.modifierFlags
+        }
+        statusItem?.button?.toolTip = "Ben · 选词翻译 \((values[.selection] ?? ShortcutAction.selection.defaultShortcut).display)"
     }
 
     /// A 16pt foreground inside an 18pt transparent template, rendered at 1x and 2x.
@@ -88,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func translateSelection() {
+        guard shortcut.recordingAction == nil else { return }
         let point = NSEvent.mouseLocation
         selectionTask?.cancel()
         model.cancel()
@@ -110,8 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showManualTranslation() {
+        guard shortcut.recordingAction == nil else { return }
         cancelSelection()
-        panel.show(near: NSEvent.mouseLocation)
+        panel.show(near: NSEvent.mouseLocation, focusInput: true)
     }
 
     @objc private func showSettings() {
@@ -119,17 +141,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reader.refreshPermission()
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 510, height: 590),
+                contentRect: NSRect(x: 0, y: 0, width: 560, height: 720),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false
             )
             window.title = "Ben 设置"
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: SettingsView(
-                model: model, reader: reader,
-                retryShortcut: { [weak self] in
-                    guard let self else { return }
-                    self.model.shortcutError = self.shortcut.register()
-                }
+                model: model, reader: reader, shortcuts: shortcut
             ))
             window.center()
             settingsWindow = window

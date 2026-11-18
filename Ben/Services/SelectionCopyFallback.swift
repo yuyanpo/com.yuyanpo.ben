@@ -199,7 +199,7 @@ struct SelectionCopyFallback {
     }
 
     private static func waitForShortcutRelease(isCurrentApplication: () -> Bool) async throws -> Bool {
-        // The triggering Option+C must be released before synthesizing Command+C.
+        // The triggering shortcut's modifiers must be released before synthesizing Command+C.
         let deadline = ContinuousClock.now.advanced(by: .milliseconds(700))
         let modifiers: CGEventFlags = [.maskAlternate, .maskControl, .maskShift, .maskCommand]
         while !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty {
