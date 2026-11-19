@@ -2,6 +2,10 @@
 
 轻量的 macOS 翻译工具
 
+**召之即来，用后即去。**
+
+https://github.com/user-attachments/assets/397bad63-6429-443e-a2b9-60477b274453
+
 选中文字后按 **Option + C**，在浮窗中查看译文；按 **Option + Z** 或从菜单栏打开「翻译文本」手动输入。两个全局快捷键都可在设置中点击录入新组合，并支持恢复默认。
 
 - 原生菜单栏应用，使用 Swift、SwiftUI、AppKit。
@@ -42,5 +46,5 @@ xcodebuild -project Ben.xcodeproj -scheme Ben -configuration Debug \
 
 - `Ben/`：应用源码与资源。
 - `scripts/`：开发运行与图标生成脚本；`run-dev.sh` 会先生成最新图标，再构建并重启 Debug 应用。
-- `reference/`：原始 Logo；更新后运行 `./scripts/generate-app-icons.sh` 生成图标。
+- `reference/`：宣传视频与原始 Logo；Logo 更新后运行 `./scripts/generate-app-icons.sh` 生成图标。
 - `specs/`：[产品需求](specs/PRD.md)与[验收记录](specs/VALIDATION.md)。
