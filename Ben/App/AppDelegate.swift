@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(translateSelection), name: .benTranslateSelection, object: nil
         )
         NotificationCenter.default.addObserver(
-            self, selector: #selector(showManualTranslation), name: .benTranslateText, object: nil
+            self, selector: #selector(showManualTranslationFromShortcut), name: .benTranslateText, object: nil
         )
         shortcut.register()
         configureStatusItem()
@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "Ben · 选词翻译 \(shortcut.shortcut(for: .selection).display)"
         }
         let menu = NSMenu()
-        shortcutMenuItems[.text] = menu.addItem(withTitle: "翻译文本", action: #selector(showManualTranslation), keyEquivalent: "")
+        shortcutMenuItems[.text] = menu.addItem(withTitle: "翻译文本", action: #selector(showManualTranslationFromMenu), keyEquivalent: "")
         shortcutMenuItems[.selection] = menu.addItem(withTitle: "翻译选中文字", action: #selector(translateSelection), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
@@ -130,10 +130,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func showManualTranslation() {
+    @objc private func showManualTranslationFromMenu() {
+        showManualTranslation(focusInput: .focus)
+    }
+
+    @objc private func showManualTranslationFromShortcut() {
+        showManualTranslation(focusInput: .selectAll)
+    }
+
+    private func showManualTranslation(focusInput: PanelController.InputFocus) {
         guard shortcut.recordingAction == nil else { return }
         cancelSelection()
-        panel.show(near: NSEvent.mouseLocation, focusInput: true)
+        panel.show(near: NSEvent.mouseLocation, focusInput: focusInput)
     }
 
     @objc private func showSettings() {

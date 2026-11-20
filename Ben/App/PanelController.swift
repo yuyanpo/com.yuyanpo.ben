@@ -8,6 +8,10 @@ private final class BenPanel: NSPanel {
 
 @MainActor
 final class PanelController {
+    enum InputFocus {
+        case unchanged, focus, selectAll
+    }
+
     private let model: TranslationViewModel
     private let panel: NSPanel
     private var localMonitor: Any?
@@ -47,7 +51,7 @@ final class PanelController {
         panel.contentView = hosting
     }
 
-    func show(near point: NSPoint, focusInput: Bool = false) {
+    func show(near point: NSPoint, focusInput: InputFocus = .unchanged) {
         let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main
         if let bounds = screen?.visibleFrame {
             let size = panel.frame.size
@@ -56,11 +60,12 @@ final class PanelController {
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
         panel.makeKeyAndOrderFront(nil)
-        if focusInput, let content = panel.contentView {
+        if focusInput != .unchanged, let content = panel.contentView {
             // The same hosting view is reused, so onAppear doesn't run on every opening.
             content.layoutSubtreeIfNeeded()
-            if let editor = inputEditor(in: content) {
-                panel.makeFirstResponder(editor)
+            if let editor = inputEditor(in: content), panel.makeFirstResponder(editor),
+               focusInput == .selectAll, !editor.string.isEmpty {
+                editor.selectAll(nil)
             }
         }
         installDismissMonitors()
