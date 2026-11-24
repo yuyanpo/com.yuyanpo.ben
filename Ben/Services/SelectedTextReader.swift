@@ -109,6 +109,8 @@ final class SelectedTextReader: ObservableObject {
                 try await Task.sleep(for: .milliseconds(enabledChromeAccessibility ? 2_200 : 80))
             }
         }
+        let focusIsTerminal = isEditor &&
+            (Self.elementAttribute(appElement, kAXFocusedUIElementAttribute).map(Self.isTerminal) ?? false)
         return try await SelectionCopyFallback(
             pasteboard: .general,
             isCurrentApplication: {
@@ -116,7 +118,9 @@ final class SelectedTextReader: ObservableObject {
                 NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier &&
                 !application.isTerminated
             },
-            requiresEditorMetadata: isEditor,
+            // The integrated xterm copies plain selected text only; Monaco's
+            // empty-selection whole-line copy cannot occur from terminal focus.
+            requiresEditorMetadata: isEditor && !focusIsTerminal,
             copyMenu: {
                 #if DEBUG
                 if CommandLine.arguments.contains("--check-selection"),
@@ -155,6 +159,18 @@ final class SelectedTextReader: ObservableObject {
 
     private static func isTextInput(_ role: String?) -> Bool {
         role == kAXTextFieldRole as String || role == kAXTextAreaRole as String || role == kAXComboBoxRole as String
+    }
+
+    /// VS Code-based editors focus xterm's hidden helper textarea in the terminal.
+    private static func isTerminal(_ focused: AXUIElement) -> Bool {
+        var element = focused
+        for _ in 0..<4 {
+            let classes = attribute(element, "AXDOMClassList") as? [String] ?? []
+            if classes.contains("xterm-helper-textarea") || classes.contains("xterm") { return true }
+            guard let parent = elementAttribute(element, kAXParentAttribute) else { return false }
+            element = parent
+        }
+        return false
     }
 
     private static func selectedText(in element: AXUIElement) throws -> String? {
