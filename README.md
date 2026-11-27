@@ -38,9 +38,9 @@ xcodebuild -project Ben.xcodeproj -scheme Ben -configuration Debug \
   -destination 'platform=macOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 ```
 
-快捷键注册与冲突检查：`./scripts/check-shortcuts.sh`（使用独立的临时偏好域和快捷键，不修改 Ben 的用户配置）。
-
-快捷键设置布局与焦点检查：`./scripts/check-shortcut-settings.sh`，渲染默认、录入、错误和深色状态并检查控件位置不变。
+- `./scripts/check-shortcuts.sh`：检查快捷键注册、冲突和回滚，不修改 Ben 的用户配置。
+- `./scripts/check-selection-copy.sh`：使用独立剪贴板检查取词兜底和剪贴板恢复。
+- `./scripts/check-baidu.sh`：离线检查百度翻译响应解析与取消处理。
 
 ## 项目结构
 

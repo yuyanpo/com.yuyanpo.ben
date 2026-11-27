@@ -16,7 +16,9 @@ struct SelectionCopyFallback {
     let copyMenu: () -> CopyMenuResult
     let copyKeyboard: () -> Bool
 
-    func readSelection() async throws -> String {
+    func readSelection(
+        waitForKeyboardRelease: @MainActor (() -> Bool) async throws -> Bool = SelectionCopyFallback.waitForShortcutRelease
+    ) async throws -> String {
         // A cancelled request may still have a Copy event in flight. Serialize
         // transactions so its cleanup cannot replace the next request's clipboard.
         while Self.transactionInProgress {
@@ -26,12 +28,16 @@ struct SelectionCopyFallback {
         }
         Self.transactionInProgress = true
         defer { Self.transactionInProgress = false }
-        guard try await Self.waitForShortcutRelease(isCurrentApplication: isCurrentApplication) else {
-            throw BenError.selectionUnavailable
-        }
+        try Task.checkCancellation()
         guard isCurrentApplication(), !IsSecureEventInputEnabled() else { throw BenError.selectionUnavailable }
         let originalCount = pasteboard.changeCount
-        let originals = try snapshot()
+        let originals: [NSPasteboardItem]
+        do {
+            originals = try snapshot()
+        } catch {
+            SelectionDiagnostics.record("copy aborted: clipboard could not be preserved")
+            throw error
+        }
         guard pasteboard.changeCount == originalCount, isCurrentApplication() else { throw BenError.selectionUnavailable }
         var copiedCount: Int?
         defer {
@@ -43,24 +49,35 @@ struct SelectionCopyFallback {
         }
         switch copyMenu() {
         case .disabled:
+            SelectionDiagnostics.record("AX Copy menu disabled")
             throw BenError.selectionUnavailable
         case .performed:
+            SelectionDiagnostics.record("AX Copy menu pressed")
             if let text = try await waitForCopiedText(since: originalCount, timeout: .milliseconds(300),
                                                       copiedCount: &copiedCount) { return text }
         case .unavailable:
+            SelectionDiagnostics.record("AX Copy menu unavailable")
             break
         }
         try Task.checkCancellation()
         guard isCurrentApplication(), !IsSecureEventInputEnabled(),
               pasteboard.changeCount == (copiedCount ?? originalCount),
-              try await Self.waitForShortcutRelease(isCurrentApplication: isCurrentApplication),
+              try await waitForKeyboardRelease(isCurrentApplication) else {
+            throw BenError.selectionUnavailable
+        }
+        try Task.checkCancellation()
+        guard isCurrentApplication(), !IsSecureEventInputEnabled(),
               pasteboard.changeCount == (copiedCount ?? originalCount) else {
             throw BenError.selectionUnavailable
         }
         // AXPress success only means the menu accepted the action. Some apps
         // produce no text until Command+C travels through the session event path.
         let keyboardBaseline = pasteboard.changeCount
-        guard copyKeyboard() else { throw BenError.selectionUnavailable }
+        guard copyKeyboard() else {
+            SelectionDiagnostics.record("keyboard copy not posted")
+            throw BenError.selectionUnavailable
+        }
+        SelectionDiagnostics.record("keyboard copy posted")
         if let text = try await waitForCopiedText(since: keyboardBaseline, timeout: .milliseconds(800),
                                                   copiedCount: &copiedCount) { return text }
         throw BenError.selectionUnavailable
@@ -97,20 +114,24 @@ struct SelectionCopyFallback {
                 if requiresEditorMetadata || metadata != nil {
                     guard let metadata, metadata["version"] as? Int == 1,
                           metadata["isFromEmptySelection"] as? Bool == false else {
+                        SelectionDiagnostics.record("copied item rejected: no valid editor selection metadata")
                         throw BenError.selectionUnavailable
                     }
                 }
                 let text = pasteboard.string(forType: .string)
                 guard pasteboard.changeCount == observedCount else { throw BenError.selectionUnavailable }
                 if let text, let selected = try SelectedTextReader.validatedText(text) {
+                    SelectionDiagnostics.record("copied selection read")
                     return selected
                 }
+                SelectionDiagnostics.record("clipboard changed without usable text")
                 return nil
             }
             try? await Task.sleep(for: .milliseconds(20))
         }
         try Task.checkCancellation()
         guard isCurrentApplication() else { throw BenError.selectionUnavailable }
+        SelectionDiagnostics.record("copy timed out with no clipboard change")
         return nil
     }
 
@@ -204,7 +225,14 @@ struct SelectionCopyFallback {
         let modifiers: CGEventFlags = [.maskAlternate, .maskControl, .maskShift, .maskCommand]
         while !CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty {
             try Task.checkCancellation()
-            guard isCurrentApplication(), ContinuousClock.now < deadline else { return false }
+            guard isCurrentApplication() else {
+                SelectionDiagnostics.record("keyboard copy cancelled: source no longer frontmost")
+                return false
+            }
+            guard ContinuousClock.now < deadline else {
+                SelectionDiagnostics.record("keyboard copy timed out waiting for modifiers")
+                return false
+            }
             try await Task.sleep(for: .milliseconds(20))
         }
         try Task.checkCancellation()

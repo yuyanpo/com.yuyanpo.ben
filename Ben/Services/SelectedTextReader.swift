@@ -32,6 +32,7 @@ final class SelectedTextReader: ObservableObject {
     }
 
     func readSelection() async throws -> String {
+        SelectionDiagnostics.record("selection started")
         guard refreshPermission() else { throw BenError.permissionRequired }
         guard let application = applicationProvider(),
               application.bundleIdentifier != Bundle.main.bundleIdentifier else {
@@ -78,6 +79,7 @@ final class SelectedTextReader: ObservableObject {
                         guard applicationProvider()?.processIdentifier == application.processIdentifier else {
                             throw BenError.selectionUnavailable
                         }
+                        SelectionDiagnostics.record("AX selection read")
                         return selected
                     }
                 }
@@ -111,6 +113,7 @@ final class SelectedTextReader: ObservableObject {
         }
         let focusIsTerminal = isEditor &&
             (Self.elementAttribute(appElement, kAXFocusedUIElementAttribute).map(Self.isTerminal) ?? false)
+        SelectionDiagnostics.record("AX selection unavailable; trying copy")
         return try await SelectionCopyFallback(
             pasteboard: .general,
             isCurrentApplication: {

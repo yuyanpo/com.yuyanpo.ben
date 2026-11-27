@@ -30,5 +30,5 @@ done
 
 # Let Finder discard an icon cached for the previous build at this path.
 touch "$app_path"
-open "$app_path"
+open "$app_path" --args "$@"
 print "已启动 Debug 版本：$app_path"
